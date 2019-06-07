@@ -1,0 +1,54 @@
+WITH a_2 as ( --First table a_1 ,The query sums of all positive transactions into the bank account excluding transfers for each customer per month
+ WITH a_1 as (SELECT DISTINCT t.customer_id, sum(t.amount) OVER( PARTITION BY t.customer_id, date_trunc('month'::text, t.transaction_date)
+ ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS total_amount, t.account_class
+ FROM transactions t
+ WHERE t.amount > 0::numeric(20,2) AND t.account_class::text = 'Bank'::text
+ AND t.spending_group_id != '4d9c747850610817942e45ab')
+   --Then we calculate the median amount based on the above sum for each customer per month ,and create a new column for brackets from 1-9
+select a_1.customer_id customer_id, median(a_1.Total_Amount) median_monthly_net_income,
+Case WHEN median_monthly_net_income >= 0    AND median_monthly_net_income <= 9285 then 1
+	 WHEN median_monthly_net_income >9285   AND median_monthly_net_income <=17141 then 2
+	 WHEN median_monthly_net_income >17141  AND median_monthly_net_income <=24316 then 3
+	 WHEN median_monthly_net_income >24316  AND median_monthly_net_income <=30980 then 4
+	 WHEN median_monthly_net_income >30980  AND median_monthly_net_income <=37269 then 5
+	 WHEN median_monthly_net_income >37269  AND median_monthly_net_income <=43349 then 6
+	 WHEN median_monthly_net_income >43349  AND median_monthly_net_income <=55149 then 7
+	 WHEN median_monthly_net_income >55149  AND median_monthly_net_income <=95449 then 8
+	 ELSE 9
+		END AS salary_bracket_id
+		from
+		a_1
+		GROUP BY 1)
+
+-- selecting the percentiles
+select
+ id category_id,description category_name,salary_bracket_id ,average ,
+ max(spend) p_0 ,max(p_90) p_10 ,max(p_80) p_20,max(p_70) p_30,max(p_60) p_40,max(q2) p_50 ,max(p_40) p_60 ,max(p_30) p_70 ,max(p_20) p_80,
+ max(p_10) p_90 ,min(spend) p_100
+
+-- calculating the percentiles
+from (
+   select c.id,c.description, cb.salary_bracket_id salary_bracket_id, t.customer_id, SUM(t.amount) spend,
+   avg(spend) over (partition by c.description, cb.salary_bracket_id) average,
+   PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY spend) OVER (partition by c.description,cb.salary_bracket_id) q2,
+   PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY spend) OVER (partition by c.description,cb.salary_bracket_id) p_10,
+   PERCENTILE_CONT(0.2) WITHIN GROUP (ORDER BY spend) OVER (partition by c.description,cb.salary_bracket_id) p_20 ,
+   PERCENTILE_CONT(0.3) WITHIN GROUP (ORDER BY spend) OVER (partition by c.description,cb.salary_bracket_id)  p_30,
+   PERCENTILE_CONT(0.4) WITHIN GROUP (ORDER BY spend) OVER (partition by c.description,cb.salary_bracket_id) p_40,
+   PERCENTILE_CONT(0.6) WITHIN GROUP (ORDER BY spend) OVER (partition by c.description,cb.salary_bracket_id)  p_60,
+   PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY spend) OVER (partition by c.description,cb.salary_bracket_id) p_70,
+   PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY spend) OVER (partition by c.description,cb.salary_bracket_id) p_80 ,
+   PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY spend) OVER (partition by c.description,cb.salary_bracket_id)  p_90
+from transactions t
+inner join a_2 cb
+on cb.customer_id =t.customer_id
+inner join
+categories c
+on c.id =t.calculated_category_id
+where  t.amount < 0
+and t.transaction_date >= DATE_ADD('day', -31, DATE_TRUNC('month', CURRENT_DATE))--this is for transactions for the last 31 days
+and t.transaction_date < DATE_TRUNC('day', CURRENT_DATE)
+group by 1,2,cb.salary_bracket_id, t.customer_id
+)
+group by 1,2,3,4 -- grouping for final results
+order by 3;
